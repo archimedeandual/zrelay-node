@@ -1,0 +1,3 @@
+[submodule "blockmessage"]
+	path = blockmessage
+	url = https://github.com/vocdoni/blockmessage
