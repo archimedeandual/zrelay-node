@@ -19,19 +19,9 @@ Data format is JSON as follows:
 + **id** is a string which identifies the operation. It's also used for randomizing the encrypted content.
 + **version** is always 1 until new version appears
 
-
-Example for sending a Z-relay transaction using [https://github.com/vocdoni/blockmessage/](blockmessage).
-
-
-```
-./blockmessage.py --port 39967 --auth vocdoni:vocdoni -i mykey -s RBx4HTje7LAQNkzAdQdnxztX9oQkacpeyU:5.00000003  \
-	--text '{ "zrelay":{"version":1, "id":"firstZTXever", "acktaddr":"RBx4HTje7LAQNkzAdQdnxztX9oQkacpeyU","destzaddr":"zcMgL78dad7iExP5YeYk4oeNhtzJ1Kvh9SqfzVC6vStEJhgPEadg6pTU1EWnhnR9NwF9EQ7RrbQnLuoWKSNcCfZu2kFufyA","amount":5} }' \
-	--encrypt --pubkey 03360daec2591105e8c53f145c9f7682826ddaeb4a20e4dd34e0b760d7c71903d1
-```
-
 ## Usage
 
-Update submodules:
+After cloning repository, update submodules:
 
 ```
 git submodule init
@@ -42,10 +32,18 @@ Export an address and its keys to a file (will be used for Z-relay operations):
 
 `./zrelay --port 39967 --auth vocdoni:vocdoni -k  > mykey`
 
+Example for sending a Z-relay transaction using [blockmessage](https://github.com/vocdoni/blockmessage/) (from any other node of the blockchain).
+
+```
+./blockmessage.py --port 39967 --auth vocdoni:vocdoni -i mykey -s RBx4HTje7LAQNkzAdQdnxztX9oQkacpeyU:5.00000003  \
+	--text '{ "zrelay":{"version":1, "id":"firstZTXever", "acktaddr":"RBx4HTje7LAQNkzAdQdnxztX9oQkacpeyU","destzaddr":"zcMgL78dad7iExP5YeYk4oeNhtzJ1Kvh9SqfzVC6vStEJhgPEadg6pTU1EWnhnR9NwF9EQ7RrbQnLuoWKSNcCfZu2kFufyA","amount":5} }' \
+	--encrypt --pubkey 03360daec2591105e8c53f145c9f7682826ddaeb4a20e4dd34e0b760d7c71903d1
+```
+
 Do the relay for new messages.
 
 ```
-./zrelay.py --port 39967 --auth vocdoni:vocdoni -i mykey
+./zrelay --port 39967 --auth vocdoni:vocdoni -i mykey
 
 My address: RBx4HTje7LAQNkzAdQdnxztX9oQkacpeyU
 My pubkey:03360daec2591105e8c53f145c9f7682826ddaeb4a20e4dd34e0b760d7c71903d1
@@ -66,7 +64,7 @@ No more messages
 ## Help
 
 ```
-usage: zrelay.py [-h] [--host RPC_HOST] [--port RPC_PORT] [--auth RPC_AUTH]
+usage: zrelay [-h] [--host RPC_HOST] [--port RPC_PORT] [--auth RPC_AUTH]
 
 optional arguments:
   -h, --help       show this help message and exit
