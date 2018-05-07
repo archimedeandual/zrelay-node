@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+
+from blockmessage.ecies import EC_KEY
+from blockmessage.tx_message import MessagingTx
+import argparse, time, sys, binascii, json
+
+# Zrelay message version 1 is as follows (JSON)
+# { "zrelay": {"version": 1, "id":"<string>", "destzaddr":"<z_addr>", "amount":<int>, "acktaddr":"<t_addr>"} }
+#
+# Fee is calculated from amounts difference. Fee must be two or three times the single fee:
+#  if acktaddr present, three transactions are required so total_fee=fee*3
+#  if acktaddr not present, total_fee=fee*2 (one for shielding and other for the actual z-tx)
+
+VERSION = 1
+MAX_WAIT_Z_OP = 30 # *10seconds
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Z transaction relay node')
+    parser.add_argument(
+            '--host',
+            dest='rpc_host',
+            type=str,
+            default="127.0.0.1",
+            help='RPC host to connect')
+    parser.add_argument(
+            '--port',
+            dest='rpc_port',
+            type=int,
+            default=None,
+            help='RPC port to connect')
+    parser.add_argument(
+            '--auth',
+            dest='rpc_auth',
+            type=str,
+            default=None,
+            help='RPC authentication params (username:password)')
+    parser.add_argument(
+            '-k',
+            dest='print_keys',
+            action="store_true",
+            help='Print wallet keys and exit')
+    parser.add_argument(
+            '-i',
+            dest='keysfile',
+            type=str,
+            default=None,
+            help='File containing own keys (generated with -k)')
+    return parser.parse_args()
+
+def print_and_exit(msg):
+        print(msg)
+        sys.exit(1)
+
+def get_rpc(port, host="127.0.0.1", user=None, passw=None):
+    if user and passw:
+        mtx = MessagingTx(host, port, user=user, passw=passw)
+    else:
+        mtx = MessagingTx(host, port)
+    return mtx
+
+def get_keys(keysfile):
+    try:
+        with open(keysfile, 'r') as kf:
+            raw_keys = kf.read()
+        keys = eval(raw_keys)
+        privkey = keys['private_key']
+        pubkey = keys['public_key']
+        address = keys['address']
+    except:
+        print_and_exit("Wrong keyfile")
+    return privkey, pubkey, address
+
+def get_ec(privkey):
+    pk = EC_KEY.deserialize_privkey(privkey)[1]
+    return EC_KEY(pk)
+
+def read(mtx, ec, debug=False):
+    raw_messages = mtx.get_messages(unspent=True)
+    messages = []
+    for m in raw_messages:
+        try:
+            jmsg = json.loads(ec.decrypt_message(m['message']).decode('utf-8'))
+            tx = m['tx']
+            if jmsg['zrelay']['version'] == VERSION:
+                if mtx.rpc.call("z_validateaddress", jmsg['zrelay']['destzaddr'])['isvalid']:
+                    if not tx['txid']:
+                        print("Transaction ID not found")
+                    else:
+                        if not 'acktaddr' in jmsg['zrelay'].keys(): jmsg['zrelay']['acktaddr'] = None
+                        if not 'id' in jmsg['zrelay'].keys(): jmsg['zrelay']['id'] = None
+                        if not 'amount' in jmsg['zrelay'].keys(): jmsg['zrelay']['amount'] = 0
+                        messages.append({'msg':jmsg['zrelay'], 'tx': tx})
+                else:
+                    print("Invalid destination Z address %s" %jmsg['zrelay']['destzaddr'])
+        except binascii.Error as e:
+            if debug: print("Got padding error %s" %e)
+        except Exception as e:
+            if debug: print("Got exception %s" %e)
+    return messages
+
+def shield(mtx, tx, fee):
+    z_addr = mtx.rpc.call('z_getnewaddress')
+    amount = tx['amount'] - fee
+    z_oid = mtx.rpc.call("z_sendmany", tx['address'], [{"address":z_addr,"amount":amount}], 1, fee)
+    return {'z_address':z_addr, 'oid':z_oid}
+
+def z_send(mtx, zfrom, zto, amount, fee):
+    balance = float(mtx.rpc.call('z_getbalance', zfrom))
+    if balance < float(amount + fee):
+        return False
+    return mtx.rpc.call("z_sendmany", zfrom, [{"address":zto,"amount":amount}], 1, fee)
+
+args = parse_args()
+
+if not args.rpc_port:
+    print_and_exit("RPC port must be specified")
+
+if args.rpc_auth:
+    try:
+        user = args.rpc_auth.split(':')[0]
+        passw = args.rpc_auth.split(':')[1]
+    except:
+        print_and_exit('Wrong RPC auth syntax, use --auth=user:password')
+    mtx = get_rpc(args.rpc_port, host=args.rpc_host, user=user, passw=passw)
+
+max_wait = 10
+while not mtx.is_rpc_ready():
+    time.sleep(1)
+    max_wait -= 1
+    if max_wait <= 0:
+        print_and_exit("Cannot connect to RPC after %d seconds" %max_wait)
+
+if args.print_keys:
+    print(mtx.get_wallet())
+    sys.exit(0)
+
+if args.keysfile:
+    try:
+        with open(args.keysfile, 'r') as kf:
+            raw_keys = kf.read()
+        keys = eval(raw_keys)
+        privkey = keys['private_key']
+        pubkey = keys['public_key']
+        address = keys['address']
+    except:
+        print_and_exit("Wrong keyfile")
+else:
+    print_and_exit("Keyfile must be specified. You might generate it using -k option.")
+
+ec = get_ec(privkey)
+print("My address: %s\nMy pubkey:%s\n" %(address,pubkey))
+
+messages = read(mtx, ec, debug=False)
+
+for m in messages:
+    print("-> Processing new message")
+    dst_amount = round(m['msg']['amount'], 8)
+    fee = round((m['tx']['amount'] - dst_amount)/2, 8)
+    if fee <= 0.0:
+        print("Not enough funds sent by the originator")
+        continue
+    print(" message id\t%s" %(m['msg']['id']))
+    print(" destination\t%s" %(m['msg']['destzaddr']))
+    print(" acknowledge\t%s" %(m['msg']['acktaddr']))
+    print(" send amount\t%.8f" %(dst_amount))
+    print(" txn fee\t%.8f" %(fee))
+
+    print("-> Shielding TX funds")
+    zshield = shield(mtx, m['tx'], fee)
+    print(" shield addr\t%s" %zshield['z_address'])
+
+    print("-> Sending %f to %s" %(dst_amount, m['msg']['destzaddr']))
+    for i in range(MAX_WAIT_Z_OP):
+        result = z_send(mtx, zshield['z_address'], m['msg']['destzaddr'], dst_amount, fee)
+        if result:
+            print("-> Successful %s" %result)
+            break
+        time.sleep(10)
+    if not result:
+        print("-> It was not possible...")
+print("No more messages")
