@@ -21,6 +21,8 @@ Data format is JSON as follows:
 
 ## Usage
 
+Install dependencies. Ubuntu/Debian: `apt install python3-ecdsa python3-pyaes`
+
 After cloning repository, update submodules:
 
 ```

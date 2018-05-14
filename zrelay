@@ -5,7 +5,7 @@ from blockmessage.tx_message import MessagingTx
 import argparse, time, sys, binascii, json
 
 # Zrelay message version 1 is as follows (JSON)
-# { "zrelay": {"version": 1, "id":"<string>", "destzaddr":"<z_addr>", "amount":<int>, "acktaddr":"<t_addr>"} }
+# { "zrelay": {"version": 1, "id":"<string>", "destzaddr":"<z_addr>", "amount":<float>, "acktaddr":"<t_addr>", "donation":<float>} }
 #
 # Fee is calculated from amounts difference. Fee must be two or three times the single fee:
 #  if acktaddr present, three transactions are required so total_fee=fee*3
@@ -34,6 +34,11 @@ def parse_args():
             type=str,
             default=None,
             help='RPC authentication params (username:password)')
+    parser.add_argument(
+            '-l',
+            dest='loop',
+            action="store_true",
+            help='Enable loop/daemon mode. Read forever for relay messages')
     parser.add_argument(
             '-k',
             dest='print_keys',
@@ -110,6 +115,34 @@ def z_send(mtx, zfrom, zto, amount, fee):
         return False
     return mtx.rpc.call("z_sendmany", zfrom, [{"address":zto,"amount":amount}], 1, fee)
 
+def read_messages(messages):
+    for m in messages:
+        print("-> Processing new message")
+        dst_amount = round(m['msg']['amount'], 8)
+        fee = round((m['tx']['amount'] - dst_amount)/2, 8)
+        if fee <= 0.0:
+            print("Not enough funds sent by the originator")
+            continue
+        print(" message id\t%s" %(m['msg']['id']))
+        print(" destination\t%s" %(m['msg']['destzaddr']))
+        print(" acknowledge\t%s" %(m['msg']['acktaddr']))
+        print(" send amount\t%.8f" %(dst_amount))
+        print(" txn fee\t%.8f" %(fee))
+
+        print("-> Shielding TX funds")
+        zshield = shield(mtx, m['tx'], fee)
+        print(" shield addr\t%s" %zshield['z_address'])
+
+        print("-> Sending %f to %s" %(dst_amount, m['msg']['destzaddr']))
+        for i in range(MAX_WAIT_Z_OP):
+            result = z_send(mtx, zshield['z_address'], m['msg']['destzaddr'], dst_amount, fee)
+            if result:
+                print("-> Successful %s" %result)
+                break
+            time.sleep(10)
+        if not result:
+            print("-> It was not possible...")
+
 args = parse_args()
 
 if not args.rpc_port:
@@ -150,32 +183,9 @@ else:
 ec = get_ec(privkey)
 print("My address: %s\nMy pubkey:%s\n" %(address,pubkey))
 
-messages = read(mtx, ec, debug=False)
-
-for m in messages:
-    print("-> Processing new message")
-    dst_amount = round(m['msg']['amount'], 8)
-    fee = round((m['tx']['amount'] - dst_amount)/2, 8)
-    if fee <= 0.0:
-        print("Not enough funds sent by the originator")
-        continue
-    print(" message id\t%s" %(m['msg']['id']))
-    print(" destination\t%s" %(m['msg']['destzaddr']))
-    print(" acknowledge\t%s" %(m['msg']['acktaddr']))
-    print(" send amount\t%.8f" %(dst_amount))
-    print(" txn fee\t%.8f" %(fee))
-
-    print("-> Shielding TX funds")
-    zshield = shield(mtx, m['tx'], fee)
-    print(" shield addr\t%s" %zshield['z_address'])
-
-    print("-> Sending %f to %s" %(dst_amount, m['msg']['destzaddr']))
-    for i in range(MAX_WAIT_Z_OP):
-        result = z_send(mtx, zshield['z_address'], m['msg']['destzaddr'], dst_amount, fee)
-        if result:
-            print("-> Successful %s" %result)
-            break
-        time.sleep(10)
-    if not result:
-        print("-> It was not possible...")
-print("No more messages")
+if args.loop:
+    while True:
+        read_messages(read(mtx, ec, debug=False))
+        time.sleep(1)
+else:
+    read_messages(read(mtx, ec, debug=False))
