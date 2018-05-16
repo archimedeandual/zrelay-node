@@ -12,7 +12,7 @@ import argparse, time, sys, binascii, json
 #  if acktaddr not present, total_fee=fee*2 (one for shielding and other for the actual z-tx)
 
 VERSION = 1
-MAX_WAIT_Z_OP = 30 # *10seconds
+MAX_WAIT_Z_OP = 50 # *5seconds
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Z transaction relay node')
@@ -79,7 +79,7 @@ def get_ec(privkey):
     pk = EC_KEY.deserialize_privkey(privkey)[1]
     return EC_KEY(pk)
 
-def read(mtx, ec, debug=False):
+def get_messages(mtx, ec, debug=False):
     raw_messages = mtx.get_messages(unspent=True)
     messages = []
     for m in raw_messages:
@@ -93,7 +93,8 @@ def read(mtx, ec, debug=False):
                     else:
                         if not 'acktaddr' in jmsg['zrelay'].keys(): jmsg['zrelay']['acktaddr'] = None
                         if not 'id' in jmsg['zrelay'].keys(): jmsg['zrelay']['id'] = None
-                        if not 'amount' in jmsg['zrelay'].keys(): jmsg['zrelay']['amount'] = 0
+                        if not 'amount' in jmsg['zrelay'].keys(): jmsg['zrelay']['amount'] = 0.0
+                        if not 'donation' in jmsg['zrelay'].keys(): jmsg['zrelay']['donation'] = 0.0
                         messages.append({'msg':jmsg['zrelay'], 'tx': tx})
                 else:
                     print("Invalid destination Z address %s" %jmsg['zrelay']['destzaddr'])
@@ -103,45 +104,94 @@ def read(mtx, ec, debug=False):
             if debug: print("Got exception %s" %e)
     return messages
 
-def shield(mtx, tx, fee):
+def shield(mtx, tx, amount, fee):
     z_addr = mtx.rpc.call('z_getnewaddress')
-    amount = tx['amount'] - fee
+    print(" shield addr\t%s" %z_addr)
+    print(" shield amount\t%.8f/%.8f" %(amount, fee))
     z_oid = mtx.rpc.call("z_sendmany", tx['address'], [{"address":z_addr,"amount":amount}], 1, fee)
     return {'z_address':z_addr, 'oid':z_oid}
 
-def z_send(mtx, zfrom, zto, amount, fee):
-    balance = float(mtx.rpc.call('z_getbalance', zfrom))
+def z_send(mtx, afrom, zto, amount, fee):
+    balance = float(mtx.rpc.call('z_getbalance', afrom))
     if balance < float(amount + fee):
         return False
-    return mtx.rpc.call("z_sendmany", zfrom, [{"address":zto,"amount":amount}], 1, fee)
+    return mtx.rpc.call("z_sendmany", afrom, [{"address":zto,"amount":amount}], 1, fee)
 
-def read_messages(messages):
+def z_check_oid(mtx, oid):
+    status = mtx.rpc.call('z_getoperationstatus',[oid])
+    try:
+        txid = status[0]['result']['txid']
+    except:
+        txid = None
+    return status[0]['status'], txid
+
+def send_ack(mtx, addr, id, fee):
+    msg = '{\"zrelay\": {\"version\": 1, \"id\":\"%s\",\"result\":\"1\" } }' %(id)
+    mtx.send_message(addr, msg, 0.0, fee)
+
+def wait_tx(mtx, txid, max=60):
+    nconf = 0
+    while nconf <= 0 and max > 0:
+        nconf = mtx.rpc.call('gettransaction', txid)['confirmations']
+        max -= 1
+        time.sleep(1)
+    return nconf > 0
+
+def proc_messages(messages):
     for m in messages:
         print("-> Processing new message")
+        ack_addr = m['msg']['acktaddr']
+        ack_addr = None # Does not work cause vout=0 is not accepted
+        donation = m['msg']['donation']
+        dst_z_addr = m['msg']['destzaddr']
         dst_amount = round(m['msg']['amount'], 8)
-        fee = round((m['tx']['amount'] - dst_amount)/2, 8)
-        if fee <= 0.0:
+        tx_amount = m['tx']['amount']
+        my_addr = m['tx']['address']
+        msg_id = m['msg']['id']
+
+        if ack_addr:
+            fee = round((tx_amount - dst_amount - donation)/2, 8)
+        else:
+            fee = round((tx_amount - dst_amount - donation), 8)
+
+        if fee < 0.00000001:
             print("Not enough funds sent by the originator")
             continue
-        print(" message id\t%s" %(m['msg']['id']))
-        print(" destination\t%s" %(m['msg']['destzaddr']))
-        print(" acknowledge\t%s" %(m['msg']['acktaddr']))
+
+        print(" message id\t%s" %(msg_id))
+        print(" destination\t%s" %(dst_z_addr))
+        print(" acknowledge\t%s" %(ack_addr))
         print(" send amount\t%.8f" %(dst_amount))
         print(" txn fee\t%.8f" %(fee))
 
-        print("-> Shielding TX funds")
-        zshield = shield(mtx, m['tx'], fee)
-        print(" shield addr\t%s" %zshield['z_address'])
+        #print("-> Shielding TX funds")
+        #zshield = shield(mtx, m['tx'], dst_amount, fee)
+        #result = z_send(mtx, zshield['z_address'], m['msg']['destzaddr'], dst_amount, fee)
 
-        print("-> Sending %f to %s" %(dst_amount, m['msg']['destzaddr']))
+        print("-> Sending %f to %s" %(dst_amount, dst_z_addr))
+        z_oid = z_send(mtx, my_addr, dst_z_addr, dst_amount, fee)
+
+        print(" waiting for %s" %(z_oid))
         for i in range(MAX_WAIT_Z_OP):
-            result = z_send(mtx, zshield['z_address'], m['msg']['destzaddr'], dst_amount, fee)
-            if result:
-                print("-> Successful %s" %result)
+            result, result_txid = z_check_oid(mtx, z_oid)
+            if result == "queued" or result == "executing":
+                print(".", end="", flush=True)
+            elif result == "success":
+                print(" successful")
+                print(" txID %s" %result_txid)
+                if ack_addr:
+                    print("-> Sending ACK to %s" %ack_addr)
+                    print(" waiting for TX to be confirmed (%s)" %result_txid)
+                    if wait_tx(mtx, result_txid):
+                        print(send_ack(mtx, ack_addr, msg_id, fee))
+                    else:
+                        print(" error sending ACK")
                 break
-            time.sleep(10)
-        if not result:
-            print("-> It was not possible...")
+            elif result == "failed":
+                print(" failed! check log for details")
+            else:
+                print(" unknown status %s" %result)
+            time.sleep(5)
 
 args = parse_args()
 
@@ -185,7 +235,7 @@ print("My address: %s\nMy pubkey:%s\n" %(address,pubkey))
 
 if args.loop:
     while True:
-        read_messages(read(mtx, ec, debug=False))
-        time.sleep(1)
+        proc_messages(get_messages(mtx, ec, debug=False))
+        time.sleep(10)
 else:
-    read_messages(read(mtx, ec, debug=False))
+    proc_messages(get_messages(mtx, ec, debug=False))
