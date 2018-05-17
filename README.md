@@ -8,14 +8,16 @@ If the content is encrypted with its self public key and data follows the Z-rela
 Data format is JSON as follows:
 
 ```
- { "zrelay": {"version": 1, "id":"<string>", "destzaddr":"<z_addr>", "amount":<float>, "acktaddr":"<t_addr>", "donation":<float>} }
+ { "zrelay": {"version": 1, "id":"<string>", "destzaddr":"<z_addr>", "amount":<float>, "acktaddr":"<t_addr>", "shield":<bool>, "donation":<float>} }
 ```
 
 + **dstzaddr** is the destination Z address where **amount** will be sent
 + **fee** is calculated from amounts difference. Fee must be one or two times the single fee:
+  + if acktaddr not present, totalfee=fee\*1
   + if acktaddr present, two transactions are required so totalfee=fee\*2
-  + if acktaddr not present, totalfee=fee\*2 (one for shielding and other for the actual z-tx)
-+ **acktaddr** is an optional T address for sending the result of the operation
+  + if shielding enabled, totalfee=fee\*3 (one for shielding, one for the actual z-tx and one for the ACK)
++ **acktaddr** is an optional T address for sending the result of the operation (not working yet)
++ **shield** if enabled shield funds to an own Z-address and do a Z-Z transaction (not working yet)
 + **id** is a string which identifies the operation. It's also used for randomizing the encrypted content.
 + **donation** amount which will be given to the Z-relay owner as monetary donation
 + **version** is always 1 until new version appears
