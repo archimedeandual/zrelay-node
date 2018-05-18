@@ -8,7 +8,7 @@ If the content is encrypted with its self public key and data follows the Z-rela
 Data format is JSON as follows:
 
 ```
- { "zrelay": {"version": 1, "id":"<string>", "destzaddr":"<z_addr>", "amount":<float>, "acktaddr":"<t_addr>", "shield":<bool>, "donation":<float>} }
+ { "zrelay": {"version": 1, "id":"<string>", "destzaddr":"<z_addr>", "amount":<float>, "acktaddr":"<t_addr>", "shield":<bool>, "donation":<float>, "memo":"<string>"} }
 ```
 
 + **dstzaddr** is the destination Z address where **amount** will be sent
@@ -20,6 +20,7 @@ Data format is JSON as follows:
 + **shield** if enabled shield funds to an own Z-address and do a Z-Z transaction (not working yet)
 + **id** is a string which identifies the operation. It's also used for randomizing the encrypted content.
 + **donation** amount which will be given to the Z-relay owner as monetary donation
++ **memo** text that will be included in the memo field of the Z transaction (512 Bytes max)
 + **version** is always 1 until new version appears
 
 ## Usage

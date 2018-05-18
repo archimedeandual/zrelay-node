@@ -5,7 +5,7 @@ from blockmessage.tx_message import MessagingTx
 import argparse, time, sys, binascii, json
 
 # Zrelay message version 1 is as follows (JSON)
-# { "zrelay": {"version": 1, "id":"<string>", "destzaddr":"<z_addr>", "amount":<float>, "acktaddr":"<t_addr>", "donation":<float>} }
+# { "zrelay": {"version": 1, "id":"<string>", "destzaddr":"<z_addr>", "amount":<float>, "acktaddr":"<t_addr>", "donation":<float>, "memo":"<string>"} }
 #
 # Fee is calculated from amounts difference. Fee must be two or three times the single fee:
 #  if acktaddr present, three transactions are required so total_fee=fee*3
@@ -53,8 +53,12 @@ def parse_args():
     return parser.parse_args()
 
 def print_and_exit(msg):
-        print(msg)
-        sys.exit(1)
+    print(msg)
+    sys.exit(1)
+
+def str_to_hex(memo):
+    return binascii.hexlify(memo.encode('utf-8')).decode('utf-8')
+
 
 def get_rpc(port, host="127.0.0.1", user=None, passw=None):
     if user and passw:
@@ -95,6 +99,7 @@ def get_messages(mtx, ec, debug=False):
                         if not 'id' in jmsg['zrelay'].keys(): jmsg['zrelay']['id'] = None
                         if not 'amount' in jmsg['zrelay'].keys(): jmsg['zrelay']['amount'] = 0.0
                         if not 'donation' in jmsg['zrelay'].keys(): jmsg['zrelay']['donation'] = 0.0
+                        if not 'memo' in jmsg['zrelay'].keys(): jmsg['zrelay']['memo'] = None
                         messages.append({'msg':jmsg['zrelay'], 'tx': tx})
                 else:
                     print("Invalid destination Z address %s" %jmsg['zrelay']['destzaddr'])
@@ -111,11 +116,14 @@ def shield(mtx, tx, amount, fee):
     z_oid = mtx.rpc.call("z_sendmany", tx['address'], [{"address":z_addr,"amount":amount}], 1, fee)
     return {'z_address':z_addr, 'oid':z_oid}
 
-def z_send(mtx, afrom, zto, amount, fee):
+def z_send(mtx, afrom, zto, amount, fee, memo=None):
     balance = float(mtx.rpc.call('z_getbalance', afrom))
     if balance < float(amount + fee):
         return False
-    return mtx.rpc.call("z_sendmany", afrom, [{"address":zto,"amount":amount}], 1, fee)
+    destination = [{"address":zto,"amount":amount}]
+    if memo:
+        destination[0]["memo"] = str_to_hex(memo)
+    return mtx.rpc.call("z_sendmany", afrom, destination, 1, fee)
 
 def z_check_oid(mtx, oid):
     status = mtx.rpc.call('z_getoperationstatus',[oid])
@@ -148,6 +156,7 @@ def proc_messages(messages):
         tx_amount = m['tx']['amount']
         my_addr = m['tx']['address']
         msg_id = m['msg']['id']
+        memo = m['msg']['memo']
 
         if ack_addr:
             fee = round((tx_amount - dst_amount - donation)/2, 8)
@@ -163,13 +172,14 @@ def proc_messages(messages):
         print(" acknowledge\t%s" %(ack_addr))
         print(" send amount\t%.8f" %(dst_amount))
         print(" txn fee\t%.8f" %(fee))
+        print(" memo   \t%s" %(memo))
 
         #print("-> Shielding TX funds")
         #zshield = shield(mtx, m['tx'], dst_amount, fee)
         #result = z_send(mtx, zshield['z_address'], m['msg']['destzaddr'], dst_amount, fee)
 
         print("-> Sending %f to %s" %(dst_amount, dst_z_addr))
-        z_oid = z_send(mtx, my_addr, dst_z_addr, dst_amount, fee)
+        z_oid = z_send(mtx, my_addr, dst_z_addr, dst_amount, fee, memo=memo)
 
         print(" waiting for %s" %(z_oid))
         for i in range(MAX_WAIT_Z_OP):
