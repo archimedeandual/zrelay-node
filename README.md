@@ -2,7 +2,7 @@
 
 A bridge between the transaparent and anonymous blockhain Z-snarks world. Useful for sending anonymous transactions from light wallets.
 
-Wait for transaprent transactions. Explore the embedded data content (OP\_RETURN). 
+Wait for transaprent transactions. Explore the embedded data content (OP\_RETURN).
 If the content is encrypted with its self public key and data follows the Z-relay standard, extracts the Z destination address and send an anonymous transaction.
 
 Data format is JSON as follows:
@@ -40,10 +40,20 @@ Export an address and its keys to a file (will be used for Z-relay operations):
 
 Example for sending a Z-relay transaction using [blockmessage](https://github.com/vocdoni/blockmessage/) (from any other node of the blockchain).
 
+ECIES:
 ```
 ./blockmessage.py --port 39967 --auth vocdoni:vocdoni -i mykey -s RBx4HTje7LAQNkzAdQdnxztX9oQkacpeyU:5.00000001  \
 	--text '{ "zrelay":{"version":1, "id":"firstZTXever", "acktaddr":"RBx4HTje7LAQNkzAdQdnxztX9oQkacpeyU","destzaddr":"zcMgL78dad7iExP5YeYk4oeNhtzJ1Kvh9SqfzVC6vStEJhgPEadg6pTU1EWnhnR9NwF9EQ7RrbQnLuoWKSNcCfZu2kFufyA","amount":5} }' \
-	--encrypt --pubkey 03360daec2591105e8c53f145c9f7682826ddaeb4a20e4dd34e0b760d7c71903d1 \
+	--encrypt ECIES --pubkey 03360daec2591105e8c53f145c9f7682826ddaeb4a20e4dd34e0b760d7c71903d1 \
+	--fee 0.00000001
+```
+
+
+RSA:
+```
+./blockmessage.py --port 39967 --auth vocdoni:vocdoni -i mykey -s RBx4HTje7LAQNkzAdQdnxztX9oQkacpeyU:5.00000001  \
+	--text '{ "zrelay":{"version":1, "id":"firstZTXever", "acktaddr":"RBx4HTje7LAQNkzAdQdnxztX9oQkacpeyU","destzaddr":"zcMgL78dad7iExP5YeYk4oeNhtzJ1Kvh9SqfzVC6vStEJhgPEadg6pTU1EWnhnR9NwF9EQ7RrbQnLuoWKSNcCfZu2kFufyA","amount":5} }' \
+	--encrypt RSA --pubkey 03360daec2591105e8c53f145c9f7682826ddaeb4a20e4dd34e0b760d7c71903d1 \
 	--fee 0.00000001
 ```
 
@@ -71,7 +81,7 @@ My pubkey:038b6cb862ad7d3fce3d3c9575471c09de2012bbf0343a84b13628ae59cc7f0a12
 
 ```
 usage: zrelay [-h] [--host RPC_HOST] [--port RPC_PORT] [--auth RPC_AUTH] [-l]
-              [-k] [-i KEYSFILE]
+              [--encrypt ALGORITHM] [-k] [-i KEYSFILE]
 
 Z transaction relay node
 
@@ -81,7 +91,7 @@ optional arguments:
   --port RPC_PORT  RPC port to connect
   --auth RPC_AUTH  RPC authentication params (username:password)
   -l               Enable loop/daemon mode. Read forever for relay messages
+  --encrypt        Choose encryption algorithm (RSA by default, ECIES optional)
   -k               Print wallet keys and exit
   -i KEYSFILE      File containing own keys (generated with -k)
 ```
-

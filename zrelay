@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from blockmessage.ecies import EC_KEY
+from blockmessage.rsa import RSA_SYS
 from blockmessage.tx_message import MessagingTx
 import argparse, time, sys, binascii, json
 
@@ -39,6 +40,12 @@ def parse_args():
             dest='loop',
             action="store_true",
             help='Enable loop/daemon mode. Read forever for relay messages')
+    parser.add_argument(
+            '--encrypt',
+            dest='encrypt',
+            type=str,
+            default="RSA",
+            help='Choose encryption algorithm, RSA by default')
     parser.add_argument(
             '-k',
             dest='print_keys',
@@ -83,12 +90,21 @@ def get_ec(privkey):
     pk = EC_KEY.deserialize_privkey(privkey)[1]
     return EC_KEY(pk)
 
-def get_messages(mtx, ec, debug=False):
+def get_messages(mtx, encrypt, privkey, pubkey, ec, debug=False):
     raw_messages = mtx.get_messages(unspent=True)
     messages = []
     for m in raw_messages:
         try:
-            jmsg = json.loads(ec.decrypt_message(m['message']).decode('utf-8'))
+            if encrypt=="ECIES":
+                ec = get_ec(privkey)
+                jmsg = json.loads(ec.decrypt_message(m['message']).decode('utf-8'))
+            elif encrypt=="RSA":
+                filePrivKey = open(privkey, "r")
+                privK = filePrivKey.read()
+                jmsg = json.loads(RSA_SYS.decrypt_message(privK, m['message'].decode('utf-8')))
+            else:
+                jmsg = json.loads(m['message'].decode('utf-8'))
+
             tx = m['tx']
             if jmsg['zrelay']['version'] == VERSION:
                 if mtx.rpc.call("z_validateaddress", jmsg['zrelay']['destzaddr'])['isvalid']:
@@ -240,12 +256,11 @@ if args.keysfile:
 else:
     print_and_exit("Keyfile must be specified. You might generate it using -k option.")
 
-ec = get_ec(privkey)
 print("My address: %s\nMy pubkey:%s\n" %(address,pubkey))
 
 if args.loop:
     while True:
-        proc_messages(get_messages(mtx, ec, debug=False))
+        proc_messages(get_messages(mtx, args.encrypt, privkey, pubkey, debug=False))
         time.sleep(10)
 else:
-    proc_messages(get_messages(mtx, ec, debug=False))
+    proc_messages(get_messages(mtx, args.encrypt, privkey, pubkey, debug=False))
